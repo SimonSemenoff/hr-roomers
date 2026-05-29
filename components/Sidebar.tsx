@@ -1,5 +1,8 @@
 "use client";
 
+import Image from "next/image";
+import { useRouter } from "next/navigation";
+
 type View = "vacancies" | "candidates" | "sources";
 
 interface Props {
@@ -14,6 +17,14 @@ const nav: { id: View; label: string; icon: string }[] = [
 ];
 
 export default function Sidebar({ activeView, onChangeView }: Props) {
+  const router = useRouter();
+
+  async function handleLogout() {
+    await fetch("/api/auth", { method: "DELETE" });
+    router.push("/login");
+    router.refresh();
+  }
+
   return (
     <aside
       className="w-[210px] flex-shrink-0 flex flex-col py-7 px-5"
@@ -21,12 +32,7 @@ export default function Sidebar({ activeView, onChangeView }: Props) {
     >
       <div className="mb-9 px-1">
         <div className="flex items-center gap-2.5">
-          <div
-            className="w-7 h-7 rounded-lg flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
-            style={{ background: "var(--text)" }}
-          >
-            HR
-          </div>
+          <Image src="/logo.png" alt="Roomers" width={28} height={28} className="flex-shrink-0" />
           <span className="text-[15px] font-semibold tracking-tight" style={{ color: "var(--text)" }}>
             HR Roomers
           </span>
@@ -65,11 +71,20 @@ export default function Sidebar({ activeView, onChangeView }: Props) {
       </nav>
 
       <div
-        className="px-3 py-3 rounded-lg text-xs leading-relaxed"
+        className="px-3 py-3 rounded-lg text-xs leading-relaxed mb-3"
         style={{ background: "var(--bg)", color: "var(--text-muted)", border: "1px solid var(--border)" }}
       >
         HH.ru · Telegram · и другие
       </div>
+
+      <button
+        onClick={handleLogout}
+        className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-all"
+        style={{ color: "var(--text-muted)" }}
+      >
+        <span className="text-xs w-4 text-center" style={{ opacity: 0.6 }}>→</span>
+        Выйти
+      </button>
     </aside>
   );
 }
