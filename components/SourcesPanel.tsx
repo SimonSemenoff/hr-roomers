@@ -1,5 +1,7 @@
 "use client";
 
+import { API_URL } from "@/lib/api";
+
 import { useEffect, useState } from "react";
 
 interface SourceStatus {
@@ -28,7 +30,7 @@ export default function SourcesPanel() {
 
   async function fetchStatuses() {
     try {
-      const res = await fetch("http://localhost:8000/api/sources");
+      const res = await fetch(`${API_URL}/api/sources`);
       const data = await res.json();
       setSources((prev) =>
         prev.map((s) => {
@@ -43,7 +45,7 @@ export default function SourcesPanel() {
     setLoading(true);
     setMsg("");
     try {
-      const res = await fetch("http://localhost:8000/api/sources/hh/connect", { method: "POST" });
+      const res = await fetch(`${API_URL}/api/sources/hh/connect`, { method: "POST" });
       const data = await res.json();
       if (data.status === "ok") {
         setMsg("HH.ru подключён успешно!");
@@ -61,7 +63,7 @@ export default function SourcesPanel() {
     setLoading(true);
     setMsg("");
     try {
-      const res = await fetch("http://localhost:8000/api/sources/telegram/send_code", {
+      const res = await fetch(`${API_URL}/api/sources/telegram/send_code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: tgPhone }),
@@ -82,7 +84,7 @@ export default function SourcesPanel() {
     setLoading(true);
     setMsg("");
     try {
-      const res = await fetch("http://localhost:8000/api/sources/telegram/verify", {
+      const res = await fetch(`${API_URL}/api/sources/telegram/verify`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: tgPhone, code: tgCode }),

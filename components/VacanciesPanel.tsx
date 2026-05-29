@@ -1,5 +1,7 @@
 "use client";
 
+import { API_URL } from "@/lib/api";
+
 import { useEffect, useState } from "react";
 
 interface Vacancy {
@@ -127,13 +129,13 @@ export default function VacanciesPanel({ onViewCandidates }: Props) {
 
   async function fetchVacancies() {
     try {
-      const res = await fetch("http://localhost:8000/api/vacancies");
+      const res = await fetch(`${API_URL}/api/vacancies`);
       setVacancies(await res.json());
     } catch {}
   }
 
   async function handleCreate(data: Omit<Vacancy, "id" | "candidate_count" | "status">) {
-    await fetch("http://localhost:8000/api/vacancies", {
+    await fetch(`${API_URL}/api/vacancies`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: Date.now().toString(), ...data, candidate_count: 0 }),
@@ -143,7 +145,7 @@ export default function VacanciesPanel({ onViewCandidates }: Props) {
   }
 
   async function handleEdit(id: string, data: Omit<Vacancy, "id" | "candidate_count" | "status">) {
-    await fetch(`http://localhost:8000/api/vacancies/${id}`, {
+    await fetch(`${API_URL}/api/vacancies/${id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
@@ -153,7 +155,7 @@ export default function VacanciesPanel({ onViewCandidates }: Props) {
   }
 
   async function handleSearch(vacancy: Vacancy) {
-    await fetch("http://localhost:8000/api/search", {
+    await fetch(`${API_URL}/api/search`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -170,7 +172,7 @@ export default function VacanciesPanel({ onViewCandidates }: Props) {
   }
 
   async function handleDelete(id: string) {
-    await fetch(`http://localhost:8000/api/vacancies/${id}`, { method: "DELETE" });
+    await fetch(`${API_URL}/api/vacancies/${id}`, { method: "DELETE" });
     fetchVacancies();
   }
 

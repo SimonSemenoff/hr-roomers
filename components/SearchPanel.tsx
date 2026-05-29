@@ -1,5 +1,7 @@
 "use client";
 
+import { API_URL } from "@/lib/api";
+
 import { useEffect, useState } from "react";
 
 interface Search {
@@ -36,7 +38,7 @@ export default function SearchPanel({ onStarted, onSelect }: Props) {
 
   async function fetchSearches() {
     try {
-      const res = await fetch("http://localhost:8000/api/searches");
+      const res = await fetch(`${API_URL}/api/searches`);
       const data = await res.json();
       setSearches(data.reverse());
     } catch {}
@@ -47,7 +49,7 @@ export default function SearchPanel({ onStarted, onSelect }: Props) {
     setLoading(true);
     const id = Date.now().toString();
     try {
-      await fetch("http://localhost:8000/api/search", {
+      await fetch(`${API_URL}/api/search`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

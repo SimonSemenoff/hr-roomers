@@ -1,5 +1,7 @@
 "use client";
 
+import { API_URL } from "@/lib/api";
+
 import { useEffect, useState } from "react";
 
 interface Candidate {
@@ -60,7 +62,7 @@ export default function CandidateTable({ searchId, onBack }: Props) {
 
   async function fetchCandidates() {
     try {
-      const res = await fetch(`http://localhost:8000/api/search/${searchId}/candidates`);
+      const res = await fetch(`${API_URL}/api/search/${searchId}/candidates`);
       const data = await res.json();
       setCandidates(data.candidates || []);
       setSearch(data.search);
@@ -71,7 +73,7 @@ export default function CandidateTable({ searchId, onBack }: Props) {
     setCandidates((prev) =>
       prev.map((c) => (c.id === candidateId ? { ...c, status: status as Candidate["status"] } : c))
     );
-    await fetch(`http://localhost:8000/api/candidate/${searchId}/${candidateId}`, {
+    await fetch(`${API_URL}/api/candidate/${searchId}/${candidateId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),

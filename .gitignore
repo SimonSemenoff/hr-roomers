@@ -39,3 +39,15 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Python
+agent/.venv/
+agent/__pycache__/
+agent/*.pyc
+agent/hh_session.json
+agent/tg_session.json
+agent/data.json
+agent/.env
+
+# Claude
+.claude/
