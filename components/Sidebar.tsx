@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 
-type View = "vacancies" | "candidates" | "sources";
+type View = "vacancies" | "candidates" | "sources" | "profile";
 
 interface Props {
   activeView: View;
@@ -13,6 +13,7 @@ interface Props {
 const nav: { id: View; label: string; icon: string }[] = [
   { id: "vacancies", label: "Вакансии", icon: "○" },
   { id: "candidates", label: "Кандидаты", icon: "≡" },
+  { id: "profile", label: "Профиль компании", icon: "★" },
   { id: "sources", label: "Источники", icon: "⊕" },
 ];
 

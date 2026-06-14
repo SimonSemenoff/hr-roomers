@@ -38,16 +38,18 @@ const SOURCES = [
 
 function VacancyForm({
   initial,
+  defaultProfile,
   onSave,
   onCancel,
 }: {
   initial?: Partial<Vacancy>;
+  defaultProfile?: string;
   onSave: (v: Omit<Vacancy, "id" | "candidate_count" | "status">) => void;
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
   const [keywords, setKeywords] = useState(initial?.keywords ?? "HoReCa, рестораны, посуда, морепродукты, стейки");
-  const [candidateProfile, setCandidateProfile] = useState(initial?.candidate_profile ?? "");
+  const [candidateProfile, setCandidateProfile] = useState(initial?.candidate_profile ?? defaultProfile ?? "");
   const [salaryFrom, setSalaryFrom] = useState(initial?.salary_from?.toString() ?? "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [sources, setSources] = useState<string[]>(initial?.sources ?? ["hh"]);
@@ -77,6 +79,9 @@ function VacancyForm({
         <label className="block text-xs mb-1.5" style={{ color: "var(--text-secondary)" }}>
           Профиль кандидата
           <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{ background: "#EFF6FF", color: "#2563EB" }}>AI использует это</span>
+          {defaultProfile && !initial?.candidate_profile && (
+            <span className="ml-1.5 text-[10px]" style={{ color: "var(--text-muted)" }}>(подставлен из профиля компании, можно отредактировать)</span>
+          )}
         </label>
         <textarea
           value={candidateProfile}
@@ -233,12 +238,22 @@ export default function VacanciesPanel({ onViewCandidates }: Props) {
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [defaultProfile, setDefaultProfile] = useState("");
 
   useEffect(() => {
     fetchVacancies();
+    fetchCompanyProfile();
     const interval = setInterval(fetchVacancies, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  async function fetchCompanyProfile() {
+    try {
+      const res = await fetch(`${API_URL}/api/company-profile`);
+      const data = await res.json();
+      setDefaultProfile(data.description || "");
+    } catch {}
+  }
 
   async function fetchVacancies() {
     try {
@@ -320,7 +335,7 @@ export default function VacanciesPanel({ onViewCandidates }: Props) {
         {creating && (
           <div className="card p-6 col-span-2 max-w-xl">
             <h2 className="text-sm font-medium mb-5" style={{ color: "var(--text)" }}>Новая вакансия</h2>
-            <VacancyForm onSave={handleCreate} onCancel={() => setCreating(false)} />
+            <VacancyForm defaultProfile={defaultProfile} onSave={handleCreate} onCancel={() => setCreating(false)} />
           </div>
         )}
 

@@ -1,16 +1,19 @@
 from __future__ import annotations
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI, BackgroundTasks, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
 import json
 import os
+import uuid
 from pathlib import Path
 from dotenv import load_dotenv
 
 from hh_agent import search_hh, connect_hh, fetch_employer_vacancies, fetch_vacancy_responses, fetch_favorites_folder
 from analyzer import analyze_candidate
+from file_extract import extract_text
 
 load_dotenv()
 
@@ -29,6 +32,8 @@ app.add_middleware(
 DATA_FILE = Path(__file__).parent / "data.json"
 HH_SESSION = Path(__file__).parent / "hh_session.json"
 TG_SESSION = Path(__file__).parent / "tg_session.json"
+UPLOADS_DIR = Path(__file__).parent / "uploads"
+UPLOADS_DIR.mkdir(exist_ok=True)
 
 # On startup, restore HH.ru session from env var if provided (for headless
 # deployments where the browser-based connect flow can't run).
@@ -43,8 +48,13 @@ if not HH_SESSION.exists() and os.getenv("HH_SESSION_B64"):
 
 def load_data() -> dict:
     if DATA_FILE.exists():
-        return json.loads(DATA_FILE.read_text())
-    return {"vacancies": {}, "candidates": {}}
+        data = json.loads(DATA_FILE.read_text())
+    else:
+        data = {"vacancies": {}, "candidates": {}}
+    data.setdefault("vacancies", {})
+    data.setdefault("candidates", {})
+    data.setdefault("company_profile", {"description": "", "links": [], "files": []})
+    return data
 
 
 def save_data(data: dict):
@@ -77,6 +87,11 @@ class VacancyUpdate(BaseModel):
 
 class ImportVacanciesBody(BaseModel):
     vacancies: list[dict]
+
+
+class CompanyProfileBody(BaseModel):
+    description: str = ""
+    links: list[str] = []
 
 
 class SearchRequest(BaseModel):
@@ -127,6 +142,65 @@ def delete_vacancy(vacancy_id: str):
     data["vacancies"].pop(vacancy_id, None)
     data["candidates"].pop(vacancy_id, None)
     save_data(data)
+    return {"ok": True}
+
+
+# ── Company profile ("идеальный портрет кандидата Roomers") ──
+@app.get("/api/company-profile")
+def get_company_profile():
+    data = load_data()
+    return data["company_profile"]
+
+
+@app.put("/api/company-profile")
+def update_company_profile(body: CompanyProfileBody):
+    data = load_data()
+    data["company_profile"]["description"] = body.description
+    data["company_profile"]["links"] = body.links
+    save_data(data)
+    return data["company_profile"]
+
+
+@app.post("/api/company-profile/files")
+async def upload_company_profile_file(file: UploadFile = File(...)):
+    file_id = uuid.uuid4().hex
+    suffix = Path(file.filename or "").suffix
+    stored_name = f"{file_id}{suffix}"
+    dest = UPLOADS_DIR / stored_name
+    content = await file.read()
+    dest.write_bytes(content)
+
+    data = load_data()
+    entry = {"id": file_id, "name": file.filename, "stored_name": stored_name}
+    data["company_profile"]["files"].append(entry)
+    save_data(data)
+    return entry
+
+
+@app.get("/api/company-profile/files/{file_id}")
+def download_company_profile_file(file_id: str):
+    data = load_data()
+    entry = next((f for f in data["company_profile"]["files"] if f["id"] == file_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    path = UPLOADS_DIR / entry["stored_name"]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Файл не найден")
+    return FileResponse(path, filename=entry["name"])
+
+
+@app.delete("/api/company-profile/files/{file_id}")
+def delete_company_profile_file(file_id: str):
+    data = load_data()
+    entry = next((f for f in data["company_profile"]["files"] if f["id"] == file_id), None)
+    if entry:
+        path = UPLOADS_DIR / entry["stored_name"]
+        if path.exists():
+            path.unlink()
+        data["company_profile"]["files"] = [
+            f for f in data["company_profile"]["files"] if f["id"] != file_id
+        ]
+        save_data(data)
     return {"ok": True}
 
 
@@ -258,10 +332,34 @@ async def tg_verify(body: dict):
         return {"status": "error", "message": str(e)}
 
 
+def build_company_context(data: dict) -> str:
+    """Build a text summary of the company's "ideal candidate" profile —
+    general description, reference links, and text extracted from uploaded
+    example CVs — to give the AI extra context beyond the per-vacancy profile."""
+    profile = data.get("company_profile", {})
+    parts = []
+
+    if profile.get("description"):
+        parts.append(profile["description"])
+
+    if profile.get("links"):
+        parts.append("Ссылки на примеры подходящих кандидатов:\n" + "\n".join(profile["links"]))
+
+    for f in profile.get("files", []):
+        path = UPLOADS_DIR / f["stored_name"]
+        if path.exists():
+            text = extract_text(path)
+            if text:
+                parts.append(f"Пример успешного резюме ({f['name']}):\n{text}")
+
+    return "\n\n".join(parts)
+
+
 # ── Background search ─────────────────────────────────────
 async def do_search(req: SearchRequest):
     data = load_data()
     seen_ids = {c["id"] for c in data["candidates"].get(req.search_id, [])}
+    company_context = build_company_context(data)
 
     try:
         raw_candidates = []
@@ -285,7 +383,7 @@ async def do_search(req: SearchRequest):
             if raw["id"] in seen_ids:
                 continue
             seen_ids.add(raw["id"])
-            analysis = await analyze_candidate(raw, req)
+            analysis = await analyze_candidate(raw, req, company_context)
             if analysis["score"] >= 6:
                 candidate = {
                     "id": raw["id"],

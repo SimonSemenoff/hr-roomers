@@ -48,6 +48,7 @@ agent/hh_session.json
 agent/tg_session.json
 agent/data.json
 agent/.env
+agent/uploads/
 
 # Claude
 .claude/

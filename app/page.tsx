@@ -5,8 +5,9 @@ import Sidebar from "@/components/Sidebar";
 import VacanciesPanel from "@/components/VacanciesPanel";
 import CandidateTable from "@/components/CandidateTable";
 import SourcesPanel from "@/components/SourcesPanel";
+import CompanyProfilePanel from "@/components/CompanyProfilePanel";
 
-type View = "vacancies" | "candidates" | "sources";
+type View = "vacancies" | "candidates" | "sources" | "profile";
 
 export default function Home() {
   const [view, setView] = useState<View>("vacancies");
@@ -26,6 +27,7 @@ export default function Home() {
           <CandidateTable searchId={activeCandidateId} onBack={() => setView("vacancies")} />
         )}
         {view === "sources" && <SourcesPanel />}
+        {view === "profile" && <CompanyProfilePanel />}
       </main>
     </div>
   );
