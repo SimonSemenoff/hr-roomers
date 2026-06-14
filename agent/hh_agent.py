@@ -72,7 +72,7 @@ async def _search_query(page, query: str, req) -> list[dict]:
         await page.goto(url)
         await asyncio.sleep(2)
 
-        resume_links = await page.query_selector_all("a.resume-search-item__name")
+        resume_links = await page.query_selector_all('a[data-qa="serp-item__title"]')
         urls = []
         for link in resume_links[:10]:  # max 10 per query
             href = await link.get_attribute("href")
@@ -156,18 +156,31 @@ async def _parse_resume(page, url: str) -> dict | None:
         await page.goto(url)
         await asyncio.sleep(1.5)
 
-        name = await _get_text(page, "[data-qa='resume-personal-name']")
-        title = await _get_text(page, "[data-qa='resume-block-title-position']")
+        name = await _get_text(page, "[data-qa='resume-personal-name-stub']") or await _get_text(page, "h2")
+        title = await _get_text(page, "[data-qa='resume-position']") or await _get_text(page, "[data-qa='resume-block-title-position']")
         city = await _get_text(page, "[data-qa='resume-personal-address']")
         age = await _get_text(page, "[data-qa='resume-personal-age']")
 
-        # Get full text for Claude analysis
-        body = await _get_text(page, ".resume")
+        # Get full text for Claude analysis from the main content blocks
+        body = await page.evaluate("""() => {
+            const sels = [
+                "[data-qa='resume-main-info__content-wrapper']",
+                "[data-qa='resume-experience-block']",
+                "[data-qa='resume-additional-info-block']",
+                "[data-qa='resume-education-block']",
+                "[data-qa='resume-languages-block']",
+                "[data-qa='resume-skills']",
+            ];
+            let out = [];
+            for (const s of sels) {
+                document.querySelectorAll(s).forEach(el => out.push(el.innerText));
+            }
+            return out.join("\\n\\n");
+        }""")
 
-        salary_el = await page.query_selector("[data-qa='resume-block-salary']")
-        salary = await salary_el.inner_text() if salary_el else ""
+        salary = await _get_text(page, "[data-qa='resume-salary-expectation']") or await _get_text(page, "[data-qa='resume-block-salary']")
 
-        photo_el = await page.query_selector(".resume-header-avatar img")
+        photo_el = await page.query_selector("[data-qa='resume-photo'] img")
         photo = await photo_el.get_attribute("src") if photo_el else ""
 
         resume_id = url.split("/")[-1].split("?")[0]
