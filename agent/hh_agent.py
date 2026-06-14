@@ -3,6 +3,7 @@ from playwright.async_api import async_playwright
 import asyncio
 import json
 import os
+import re
 from pathlib import Path
 
 HH_SESSION_FILE = Path(__file__).parent / "hh_session.json"
@@ -77,12 +78,56 @@ async def _search_query(page, query: str, req) -> list[dict]:
             candidate = await _parse_resume(page, url)
             if candidate:
                 results.append(candidate)
+                await add_to_favorites_folder(page)
             await asyncio.sleep(1)
 
     except Exception as e:
         print(f"Error searching query '{query}': {e}")
 
     return results
+
+
+FAVORITES_FOLDER_NAME = "AI Roomers"
+
+
+async def add_to_favorites_folder(page, folder_name: str = FAVORITES_FOLDER_NAME) -> bool:
+    """Add the resume currently open in `page` to the given HH.ru favorites folder
+    (e.g. "AI Roomers"), so the employer can review it later in their account.
+    """
+    try:
+        fav_btn = await page.query_selector('[data-qa="resume-favorite-button"]')
+        if not fav_btn:
+            return False
+        await fav_btn.click()
+        await asyncio.sleep(1)
+
+        items = await page.query_selector_all('li[data-qa^="resume-serp__favourite-popup-item_"]')
+        target_label = None
+        target_checkbox = None
+        for item in items:
+            title_el = await item.query_selector('[data-qa="resume-serp__favourite-popup-item-title"]')
+            if title_el and (await title_el.inner_text()).strip() == folder_name:
+                target_label = await item.query_selector("label")
+                target_checkbox = await item.query_selector('input[type="checkbox"]')
+                break
+
+        if not target_label:
+            print(f"Folder '{folder_name}' not found in favorites popup")
+            return False
+
+        already_checked = await target_checkbox.is_checked() if target_checkbox else False
+        if not already_checked:
+            await target_label.click()
+            await asyncio.sleep(0.5)
+
+        save_btn = await page.query_selector('[data-qa="resume-serp__favourite-popup-save"]')
+        if save_btn:
+            await save_btn.click()
+            await asyncio.sleep(1)
+        return True
+    except Exception as e:
+        print(f"Error adding resume to favorites folder: {e}")
+        return False
 
 
 def _build_search_url(query: str, req) -> str:
@@ -244,6 +289,68 @@ async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> list[d
                 continue
             # Only actual applicants ("responses"), not suggested matches
             if "hhtmFromLabel=responses" not in href:
+                continue
+            resume_id = href.split("/resume/")[1].split("?")[0]
+            if resume_id in seen_ids:
+                continue
+            seen_ids.add(resume_id)
+            full_url = href if href.startswith("http") else "https://hh.ru" + href
+            resume_urls.append(full_url)
+            if len(resume_urls) >= limit:
+                break
+
+        for r_url in resume_urls:
+            candidate = await _parse_resume(page, r_url)
+            if candidate:
+                results.append(candidate)
+            await asyncio.sleep(1)
+
+        await browser.close()
+    return results
+
+
+async def fetch_favorites_folder(folder_name: str = FAVORITES_FOLDER_NAME, limit: int = 50) -> list[dict]:
+    """Fetch candidates saved to the given HH.ru favorites folder (e.g. "AI Roomers"),
+    so they show up as candidates on the site."""
+    results = []
+    seen_ids = set()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await _load_or_create_context(browser)
+        page = await context.new_page()
+
+        # Resolve the folder id by name
+        await page.goto("https://hh.ru/employer/resumefolders", wait_until="domcontentloaded")
+        await asyncio.sleep(2)
+        html = await page.content()
+        folder_id = None
+        m = re.search(r'"foldersInvariants":\{(.*?),"totalResumesCount"', html)
+        if m:
+            try:
+                folders_json = "{" + m.group(1) + "}"
+                folders = json.loads(folders_json)
+                for fid, info in {**folders.get("own", {}), **folders.get("shared", {})}.items():
+                    if info.get("name") == folder_name:
+                        folder_id = fid
+                        break
+            except Exception as e:
+                print(f"Error parsing resume folders: {e}")
+
+        if not folder_id:
+            print(f"Favorites folder '{folder_name}' not found")
+            await browser.close()
+            return results
+
+        await page.goto(f"https://hh.ru/employer/resumefolders?folder={folder_id}", wait_until="domcontentloaded")
+        await asyncio.sleep(2)
+
+        links = await page.query_selector_all('a[href*="/resume/"]')
+        resume_urls = []
+        for link in links:
+            href = await link.get_attribute("href")
+            if not href or "/resume/" not in href:
+                continue
+            if "hhtmFrom=employer_folders_grid" not in href:
                 continue
             resume_id = href.split("/resume/")[1].split("?")[0]
             if resume_id in seen_ids:

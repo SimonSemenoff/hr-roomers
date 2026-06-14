@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-from hh_agent import search_hh, connect_hh, fetch_employer_vacancies, fetch_vacancy_responses
+from hh_agent import search_hh, connect_hh, fetch_employer_vacancies, fetch_vacancy_responses, fetch_favorites_folder
 from analyzer import analyze_candidate
 
 load_dotenv()
@@ -266,11 +266,19 @@ async def do_search(req: SearchRequest):
     try:
         raw_candidates = []
         response_ids = set()
+        favorite_ids = set()
         if "hh" in req.sources:
             if req.hh_vacancy_id:
                 responses = await fetch_vacancy_responses(req.hh_vacancy_id)
                 response_ids = {c["id"] for c in responses}
                 raw_candidates += responses
+
+            favorites = await fetch_favorites_folder()
+            favorite_ids = {c["id"] for c in favorites}
+            for c in favorites:
+                if c["id"] not in response_ids:
+                    raw_candidates.append(c)
+
             raw_candidates += await search_hh(req)
 
         for raw in raw_candidates:
@@ -293,7 +301,11 @@ async def do_search(req: SearchRequest):
                     "why_fits": analysis["why_fits"],
                     "red_flags": analysis.get("red_flags", ""),
                     "status": "new",
-                    "source": "hh_response" if raw["id"] in response_ids else "hh",
+                    "source": (
+                        "hh_response" if raw["id"] in response_ids
+                        else "hh_favorite" if raw["id"] in favorite_ids
+                        else "hh"
+                    ),
                 }
                 data = load_data()
                 if req.search_id not in data["candidates"]:

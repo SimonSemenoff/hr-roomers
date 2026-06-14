@@ -15,6 +15,16 @@ interface Vacancy {
   last_run?: string;
   candidate_count: number;
   status?: "running" | "done" | "idle";
+  hh_vacancy_id?: string | null;
+  hh_url?: string | null;
+}
+
+interface HhVacancy {
+  hh_id: string;
+  title: string;
+  url: string;
+  responses_count: string;
+  imported: boolean;
 }
 
 interface Props {
@@ -116,10 +126,113 @@ function VacancyForm({
   );
 }
 
+function ImportHhModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [hhVacancies, setHhVacancies] = useState<HhVacancy[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [importing, setImporting] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/sources/hh/vacancies`);
+        const data = await res.json();
+        if (data.status === "ok") {
+          setHhVacancies(data.vacancies);
+          setSelected(new Set(data.vacancies.filter((v: HhVacancy) => !v.imported).map((v: HhVacancy) => v.hh_id)));
+        } else {
+          setError(data.message || "Не удалось получить вакансии");
+        }
+      } catch {
+        setError("Не удалось подключиться к серверу");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleImport() {
+    setImporting(true);
+    const toImport = hhVacancies.filter((v) => selected.has(v.hh_id) && !v.imported);
+    await fetch(`${API_URL}/api/vacancies/import_hh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ vacancies: toImport }),
+    });
+    setImporting(false);
+    onImported();
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.4)" }}>
+      <div className="card p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto">
+        <h2 className="text-sm font-semibold mb-1" style={{ color: "var(--text)" }}>Импорт вакансий с HH.ru</h2>
+        <p className="text-xs mb-4" style={{ color: "var(--text-muted)" }}>
+          Выбери вакансии — для каждой создастся карточка, останется заполнить профиль кандидата.
+        </p>
+
+        {loading && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Загрузка...</p>}
+        {error && <p className="text-sm" style={{ color: "#DC2626" }}>{error}</p>}
+
+        {!loading && !error && (
+          <div className="space-y-2 mb-5">
+            {hhVacancies.map((v) => (
+              <label
+                key={v.hh_id}
+                className="flex items-center gap-3 p-3 rounded-lg cursor-pointer"
+                style={{ border: "1px solid var(--border)", background: v.imported ? "var(--bg)" : "var(--surface)" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.has(v.hh_id)}
+                  disabled={v.imported}
+                  onChange={() => toggle(v.hh_id)}
+                />
+                <div className="flex-1">
+                  <div className="text-sm" style={{ color: "var(--text)" }}>{v.title}</div>
+                  <div className="text-xs" style={{ color: "var(--text-muted)" }}>
+                    Откликов: {v.responses_count} {v.imported && "· уже импортирована"}
+                  </div>
+                </div>
+              </label>
+            ))}
+            {hhVacancies.length === 0 && (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>Активных вакансий на HH.ru не найдено</p>
+            )}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleImport}
+            disabled={loading || importing || selected.size === 0}
+            className="btn-primary flex-1 justify-center"
+          >
+            {importing ? "Импортируем..." : `Импортировать (${selected.size})`}
+          </button>
+          <button onClick={onClose} className="btn-secondary">Отмена</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function VacanciesPanel({ onViewCandidates }: Props) {
   const [vacancies, setVacancies] = useState<Vacancy[]>([]);
   const [creating, setCreating] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     fetchVacancies();
@@ -166,6 +279,7 @@ export default function VacanciesPanel({ onViewCandidates }: Props) {
         salary_from: vacancy.salary_from,
         notes: vacancy.notes,
         sources: vacancy.sources,
+        hh_vacancy_id: vacancy.hh_vacancy_id,
       }),
     });
     fetchVacancies();
@@ -186,11 +300,20 @@ export default function VacanciesPanel({ onViewCandidates }: Props) {
           </p>
         </div>
         {!creating && (
-          <button onClick={() => setCreating(true)} className="btn-primary">
-            + Новая вакансия
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => setImporting(true)} className="btn-secondary">
+              ⇣ Импорт с HH.ru
+            </button>
+            <button onClick={() => setCreating(true)} className="btn-primary">
+              + Новая вакансия
+            </button>
+          </div>
         )}
       </div>
+
+      {importing && (
+        <ImportHhModal onClose={() => setImporting(false)} onImported={fetchVacancies} />
+      )}
 
       <div className="grid grid-cols-2 gap-6 max-w-5xl">
         {/* Create form */}
@@ -216,7 +339,20 @@ export default function VacanciesPanel({ onViewCandidates }: Props) {
             ) : (
               <>
                 <div className="flex items-start justify-between gap-2 mb-3">
-                  <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{v.title}</h3>
+                  <div>
+                    <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{v.title}</h3>
+                    {v.hh_vacancy_id && (
+                      <a
+                        href={v.hh_url || "#"}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[11px] hover:underline"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        Импортировано с HH.ru ↗
+                      </a>
+                    )}
+                  </div>
                   {v.status === "running" && (
                     <span
                       className="text-[11px] px-2 py-0.5 rounded-full font-medium flex-shrink-0"

@@ -18,8 +18,15 @@ interface Candidate {
   why_fits: string;
   red_flags?: string;
   status: "new" | "viewed" | "interesting" | "rejected";
-  source: "hh" | "telegram";
+  source: "hh" | "hh_response" | "hh_favorite" | "telegram";
 }
+
+const sourceLabels: Record<string, string> = {
+  hh: "HH.ru · поиск",
+  hh_response: "HH.ru · отклик",
+  hh_favorite: "HH.ru · избранное",
+  telegram: "Telegram",
+};
 
 interface Props {
   searchId: string | null;
@@ -172,6 +179,14 @@ export default function CandidateTable({ searchId, onBack }: Props) {
                     <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
                       {[c.city, c.age, c.salary].filter(Boolean).join(" · ")}
                     </p>
+                    {c.source && (
+                      <span
+                        className="inline-block text-xs mt-1 px-2 py-0.5 rounded-full"
+                        style={{ background: "var(--hover)", color: "var(--text-secondary)" }}
+                      >
+                        {sourceLabels[c.source] || c.source}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <ScoreDot score={c.score} />
