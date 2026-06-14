@@ -108,7 +108,7 @@ async def add_to_favorites_folder(page, folder_name: str = FAVORITES_FOLDER_NAME
         await fav_btn.click()
         await asyncio.sleep(1)
 
-        items = await page.query_selector_all('li[data-qa^="resume-serp__favourite-popup-item_"]')
+        items = await page.query_selector_all('[data-qa*="resume-serp__favourite-popup-item_"]')
         target_label = None
         target_checkbox = None
         for item in items:
