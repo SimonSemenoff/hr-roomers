@@ -404,20 +404,27 @@ async def do_search(req: SearchRequest):
                 responses = await fetch_vacancy_responses(req.hh_vacancy_id)
                 response_ids = {c["id"] for c in responses}
                 raw_candidates += responses
+                print(f"[search {req.search_id}] responses: {len(responses)}")
 
             favorites = await fetch_favorites_folder()
             favorite_ids = {c["id"] for c in favorites}
             for c in favorites:
                 if c["id"] not in response_ids:
                     raw_candidates.append(c)
+            print(f"[search {req.search_id}] favorites: {len(favorites)}")
 
-            raw_candidates += await search_hh(req)
+            hh_results = await search_hh(req)
+            raw_candidates += hh_results
+            print(f"[search {req.search_id}] hh search results: {len(hh_results)}")
+
+        print(f"[search {req.search_id}] total raw candidates: {len(raw_candidates)}, already seen: {len(seen_ids)}")
 
         for raw in raw_candidates:
             if raw["id"] in seen_ids:
                 continue
             seen_ids.add(raw["id"])
             analysis = await analyze_candidate(raw, req, company_context, feedback_context)
+            print(f"[search {req.search_id}] candidate {raw.get('name')!r} score={analysis['score']}")
             if analysis["score"] >= 6:
                 candidate = {
                     "id": raw["id"],

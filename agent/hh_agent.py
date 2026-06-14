@@ -36,13 +36,17 @@ async def search_hh(req) -> list[dict]:
         await page.goto("https://hh.ru/employer/resumesearch")
         await asyncio.sleep(2)
 
+        print(f"[search_hh] resumesearch url after goto: {page.url}")
+
         if "login" in page.url or "account/login" in page.url:
+            print("[search_hh] not logged in, attempting login flow")
             await _do_login(page)
 
         await _save_session(context)
 
         for query in queries:
             found = await _search_query(page, query, req)
+            print(f"[search_hh] query {query!r} -> {len(found)} resumes")
             for c in found:
                 if c["id"] not in seen_ids:
                     seen_ids.add(c["id"])
@@ -74,6 +78,8 @@ async def _search_query(page, query: str, req) -> list[dict]:
             href = await link.get_attribute("href")
             if href:
                 urls.append("https://hh.ru" + href if href.startswith("/") else href)
+
+        print(f"[_search_query] url={url} -> {len(resume_links)} links found, {len(urls)} urls")
 
         for url in urls:
             candidate = await _parse_resume(page, url)
