@@ -389,11 +389,31 @@ def build_feedback_context(data: dict, max_each: int = 5) -> str:
 
 
 # ── Background search ─────────────────────────────────────
+def _save_debug(search_id: str, **kwargs):
+    """Persist progress/diagnostics for a search run so the frontend (and we,
+    via /api/searches) can see what happened without digging through Railway
+    logs."""
+    data = load_data()
+    if search_id not in data["vacancies"]:
+        return
+    debug = data["vacancies"][search_id].get("debug", {})
+    debug.update(kwargs)
+    data["vacancies"][search_id]["debug"] = debug
+    save_data(data)
+
+
 async def do_search(req: SearchRequest):
     data = load_data()
     seen_ids = {c["id"] for c in data["candidates"].get(req.search_id, [])}
     company_context = build_company_context(data)
     feedback_context = build_feedback_context(data)
+
+    _save_debug(
+        req.search_id,
+        responses=None, favorites=None, hh_results=None,
+        total_raw=None, already_seen=len(seen_ids),
+        evaluated=[], error=None,
+    )
 
     try:
         raw_candidates = []
@@ -405,6 +425,7 @@ async def do_search(req: SearchRequest):
                 response_ids = {c["id"] for c in responses}
                 raw_candidates += responses
                 print(f"[search {req.search_id}] responses: {len(responses)}")
+                _save_debug(req.search_id, responses=len(responses))
 
             favorites = await fetch_favorites_folder()
             favorite_ids = {c["id"] for c in favorites}
@@ -412,19 +433,29 @@ async def do_search(req: SearchRequest):
                 if c["id"] not in response_ids:
                     raw_candidates.append(c)
             print(f"[search {req.search_id}] favorites: {len(favorites)}")
+            _save_debug(req.search_id, favorites=len(favorites))
 
             hh_results = await search_hh(req)
             raw_candidates += hh_results
             print(f"[search {req.search_id}] hh search results: {len(hh_results)}")
+            _save_debug(req.search_id, hh_results=len(hh_results))
 
         print(f"[search {req.search_id}] total raw candidates: {len(raw_candidates)}, already seen: {len(seen_ids)}")
+        _save_debug(req.search_id, total_raw=len(raw_candidates))
 
+        evaluated = []
         for raw in raw_candidates:
             if raw["id"] in seen_ids:
                 continue
             seen_ids.add(raw["id"])
             analysis = await analyze_candidate(raw, req, company_context, feedback_context)
             print(f"[search {req.search_id}] candidate {raw.get('name')!r} score={analysis['score']}")
+            evaluated.append({
+                "name": raw.get("name", ""),
+                "score": analysis["score"],
+                "passed": analysis["score"] >= 6,
+            })
+            _save_debug(req.search_id, evaluated=evaluated)
             if analysis["score"] >= 6:
                 candidate = {
                     "id": raw["id"],
@@ -466,3 +497,4 @@ async def do_search(req: SearchRequest):
             data["vacancies"][req.search_id]["status"] = "idle"
             save_data(data)
         print(f"Search error: {e}")
+        _save_debug(req.search_id, error=str(e))
