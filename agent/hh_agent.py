@@ -313,10 +313,25 @@ async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> tuple[
         page = await context.new_page()
         url = f"https://hh.ru/employer/vacancyresponses?vacancyId={hh_vacancy_id}"
         await page.goto(url, wait_until="domcontentloaded")
-        await asyncio.sleep(2)
+        await asyncio.sleep(4)
 
         print(f"[fetch_vacancy_responses] url after goto: {page.url}")
         debug_info["page_url"] = page.url
+
+        body_text = await _get_text(page, "body")
+        debug_info["body_len"] = len(body_text)
+        debug_info["body_snippet"] = body_text[:300]
+        print(f"[fetch_vacancy_responses] body_len={len(body_text)}, snippet={body_text[:300]!r}")
+
+        all_links = await page.query_selector_all("a")
+        all_hrefs_full = []
+        for link in all_links:
+            href = await link.get_attribute("href")
+            if href:
+                all_hrefs_full.append(href)
+        print(f"[fetch_vacancy_responses] total <a> tags: {len(all_hrefs_full)}")
+        debug_info["total_a_tags"] = len(all_hrefs_full)
+        debug_info["sample_all_hrefs"] = all_hrefs_full[:15]
 
         links = await page.query_selector_all('a[href*="/resume/"]')
         all_hrefs = []
