@@ -29,10 +29,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DATA_FILE = Path(__file__).parent / "data.json"
-HH_SESSION = Path(__file__).parent / "hh_session.json"
-TG_SESSION = Path(__file__).parent / "tg_session.json"
-UPLOADS_DIR = Path(__file__).parent / "uploads"
+# DATA_DIR points at a persistent volume in production (set DATA_DIR=/data on
+# Railway and mount a volume there). Falls back to the agent/ folder for local
+# development, where the filesystem is already persistent.
+DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).parent)))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+DATA_FILE = DATA_DIR / "data.json"
+HH_SESSION = DATA_DIR / "hh_session.json"
+TG_SESSION = DATA_DIR / "tg_session.json"
+UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
 # On startup, restore HH.ru session from env var if provided (for headless

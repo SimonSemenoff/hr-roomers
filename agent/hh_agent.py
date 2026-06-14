@@ -6,7 +6,8 @@ import os
 import re
 from pathlib import Path
 
-HH_SESSION_FILE = Path(__file__).parent / "hh_session.json"
+DATA_DIR = Path(os.getenv("DATA_DIR", str(Path(__file__).parent)))
+HH_SESSION_FILE = DATA_DIR / "hh_session.json"
 
 SEARCH_QUERIES = {
     "horeca_sales": [
