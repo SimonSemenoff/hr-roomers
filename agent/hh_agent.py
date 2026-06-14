@@ -153,11 +153,29 @@ async def connect_hh() -> bool:
         await page.goto("https://hh.ru/account/login")
         print("Войдите в HH.ru вручную...")
         try:
-            await page.wait_for_url("https://hh.ru/**", timeout=120000)
-            await _save_session(context)
-            await browser.close()
-            return True
-        except Exception:
+            # HH.ru sets a "hhrole" cookie = "anonymous" until the user logs in,
+            # and "applicant"/"employer" afterwards. Poll for that change.
+            deadline = asyncio.get_event_loop().time() + 120
+            logged_in = False
+            while asyncio.get_event_loop().time() < deadline:
+                cookies = await context.cookies()
+                hhrole = next((c["value"] for c in cookies if c["name"] == "hhrole"), None)
+                if hhrole and hhrole != "anonymous":
+                    logged_in = True
+                    break
+                await asyncio.sleep(1)
+
+            if logged_in:
+                await page.wait_for_timeout(2000)
+                await _save_session(context)
+                await browser.close()
+                return True
+            else:
+                print("Вход не выполнен — истекло время ожидания (120 сек)")
+                await browser.close()
+                return False
+        except Exception as e:
+            print(f"Ошибка при ожидании входа: {e}")
             await browser.close()
             return False
 
@@ -166,6 +184,84 @@ async def _do_login(page):
     print("HH.ru: нужна авторизация. Войдите вручную в браузере...")
     await page.wait_for_url("**/employer/**", timeout=120000)
     print("Авторизация успешна!")
+
+
+async def fetch_employer_vacancies() -> list[dict]:
+    """Fetch the list of the employer's active vacancies from HH.ru."""
+    results = []
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await _load_or_create_context(browser)
+        page = await context.new_page()
+        await page.goto("https://hh.ru/employer/vacancies", wait_until="domcontentloaded")
+        await asyncio.sleep(2)
+
+        cards = await page.query_selector_all('[data-qa="vacancies-dashboard-vacancy"]')
+        for card in cards:
+            try:
+                name_link = await card.query_selector('a[data-qa="vacancies-dashboard-vacancy-name"]')
+                if not name_link:
+                    continue
+                title = (await name_link.inner_text()).strip()
+                href = await name_link.get_attribute("href")
+                vacancy_id = href.split("/vacancy/")[-1].split("?")[0] if href else None
+
+                resp_el = await card.query_selector('[data-qa="vacancies-dashboard-vacancy-responses-count-total"]')
+                responses_raw = (await resp_el.inner_text()).strip() if resp_el else "0"
+                responses = responses_raw.split("\n")[0].strip()
+
+                if vacancy_id:
+                    results.append({
+                        "hh_id": vacancy_id,
+                        "title": title,
+                        "url": f"https://hh.ru/vacancy/{vacancy_id}",
+                        "responses_count": responses,
+                    })
+            except Exception as e:
+                print(f"Error parsing vacancy card: {e}")
+
+        await browser.close()
+    return results
+
+
+async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> list[dict]:
+    """Fetch candidates who responded ('откликнулись') to a specific HH.ru vacancy."""
+    results = []
+    seen_ids = set()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await _load_or_create_context(browser)
+        page = await context.new_page()
+        url = f"https://hh.ru/employer/vacancyresponses?vacancyId={hh_vacancy_id}"
+        await page.goto(url, wait_until="domcontentloaded")
+        await asyncio.sleep(2)
+
+        links = await page.query_selector_all('a[href*="/resume/"]')
+        resume_urls = []
+        for link in links:
+            href = await link.get_attribute("href")
+            if not href or "/resume/" not in href:
+                continue
+            # Only actual applicants ("responses"), not suggested matches
+            if "hhtmFromLabel=responses" not in href:
+                continue
+            resume_id = href.split("/resume/")[1].split("?")[0]
+            if resume_id in seen_ids:
+                continue
+            seen_ids.add(resume_id)
+            full_url = href if href.startswith("http") else "https://hh.ru" + href
+            resume_urls.append(full_url)
+            if len(resume_urls) >= limit:
+                break
+
+        for r_url in resume_urls:
+            candidate = await _parse_resume(page, r_url)
+            if candidate:
+                results.append(candidate)
+            await asyncio.sleep(1)
+
+        await browser.close()
+    return results
 
 
 async def _load_or_create_context(browser):

@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-from hh_agent import search_hh, connect_hh
+from hh_agent import search_hh, connect_hh, fetch_employer_vacancies, fetch_vacancy_responses
 from analyzer import analyze_candidate
 
 load_dotenv()
@@ -17,7 +17,11 @@ load_dotenv()
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "https://hr-roomers-production.up.railway.app",
+    ],
+    allow_origin_regex=r"https://.*\.up\.railway\.app",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -25,6 +29,16 @@ app.add_middleware(
 DATA_FILE = Path(__file__).parent / "data.json"
 HH_SESSION = Path(__file__).parent / "hh_session.json"
 TG_SESSION = Path(__file__).parent / "tg_session.json"
+
+# On startup, restore HH.ru session from env var if provided (for headless
+# deployments where the browser-based connect flow can't run).
+if not HH_SESSION.exists() and os.getenv("HH_SESSION_B64"):
+    import base64
+    try:
+        HH_SESSION.write_bytes(base64.b64decode(os.getenv("HH_SESSION_B64")))
+        print("Restored hh_session.json from HH_SESSION_B64 env var")
+    except Exception as e:
+        print(f"Failed to restore HH session from env var: {e}")
 
 
 def load_data() -> dict:
@@ -46,6 +60,8 @@ class VacancyBody(BaseModel):
     notes: Optional[str] = None
     sources: list[str] = ["hh"]
     candidate_count: int = 0
+    hh_vacancy_id: Optional[str] = None
+    hh_url: Optional[str] = None
 
 
 class VacancyUpdate(BaseModel):
@@ -55,6 +71,12 @@ class VacancyUpdate(BaseModel):
     salary_from: Optional[int] = None
     notes: Optional[str] = None
     sources: list[str] = ["hh"]
+    hh_vacancy_id: Optional[str] = None
+    hh_url: Optional[str] = None
+
+
+class ImportVacanciesBody(BaseModel):
+    vacancies: list[dict]
 
 
 class SearchRequest(BaseModel):
@@ -65,6 +87,7 @@ class SearchRequest(BaseModel):
     salary_from: Optional[int] = None
     notes: Optional[str] = None
     sources: list[str] = ["hh"]
+    hh_vacancy_id: Optional[str] = None
 
 
 # ── Health ─────────────────────────────────────────────────
@@ -168,6 +191,53 @@ async def connect_hh_account():
     return {"status": "ok" if success else "error"}
 
 
+@app.get("/api/sources/hh/vacancies")
+async def get_hh_vacancies():
+    """List the employer's active vacancies on HH.ru, for import."""
+    if not HH_SESSION.exists():
+        return {"status": "error", "message": "HH.ru не подключён", "vacancies": []}
+    try:
+        vacancies = await fetch_employer_vacancies()
+        # Mark which ones are already imported
+        data = load_data()
+        existing_hh_ids = {
+            v.get("hh_vacancy_id") for v in data["vacancies"].values() if v.get("hh_vacancy_id")
+        }
+        for v in vacancies:
+            v["imported"] = v["hh_id"] in existing_hh_ids
+        return {"status": "ok", "vacancies": vacancies}
+    except Exception as e:
+        return {"status": "error", "message": str(e), "vacancies": []}
+
+
+@app.post("/api/vacancies/import_hh")
+def import_hh_vacancies(body: ImportVacanciesBody):
+    """Create local vacancy entries from selected HH.ru vacancies."""
+    data = load_data()
+    created = []
+    for v in body.vacancies:
+        vacancy_id = f"hh_{v['hh_id']}"
+        if vacancy_id in data["vacancies"]:
+            continue
+        entry = {
+            "id": vacancy_id,
+            "title": v["title"],
+            "keywords": v["title"],
+            "candidate_profile": "",
+            "salary_from": None,
+            "notes": "",
+            "sources": ["hh"],
+            "candidate_count": 0,
+            "hh_vacancy_id": v["hh_id"],
+            "hh_url": v.get("url"),
+            "status": "idle",
+        }
+        data["vacancies"][vacancy_id] = entry
+        created.append(entry)
+    save_data(data)
+    return {"status": "ok", "created": created}
+
+
 @app.post("/api/sources/telegram/send_code")
 async def tg_send_code(body: dict):
     try:
@@ -195,7 +265,12 @@ async def do_search(req: SearchRequest):
 
     try:
         raw_candidates = []
+        response_ids = set()
         if "hh" in req.sources:
+            if req.hh_vacancy_id:
+                responses = await fetch_vacancy_responses(req.hh_vacancy_id)
+                response_ids = {c["id"] for c in responses}
+                raw_candidates += responses
             raw_candidates += await search_hh(req)
 
         for raw in raw_candidates:
@@ -218,7 +293,7 @@ async def do_search(req: SearchRequest):
                     "why_fits": analysis["why_fits"],
                     "red_flags": analysis.get("red_flags", ""),
                     "status": "new",
-                    "source": "hh",
+                    "source": "hh_response" if raw["id"] in response_ids else "hh",
                 }
                 data = load_data()
                 if req.search_id not in data["candidates"]:
