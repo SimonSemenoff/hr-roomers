@@ -64,7 +64,25 @@ def load_data() -> dict:
 
 
 def save_data(data: dict):
-    DATA_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    # Safety net: if the file on disk currently has vacancies/candidates but
+    # the data we're about to write would wipe them out (e.g. because this
+    # process's in-memory state was loaded from a moment when /data was
+    # briefly empty during a deploy/volume remount), refuse the write and
+    # keep the existing file instead of silently losing everything.
+    if DATA_FILE.exists():
+        try:
+            existing = json.loads(DATA_FILE.read_text())
+            existing_has_data = bool(existing.get("vacancies")) or bool(existing.get("candidates"))
+            new_is_empty = not data.get("vacancies") and not data.get("candidates")
+            if existing_has_data and new_is_empty:
+                print("[save_data] refusing to overwrite non-empty data.json with empty data")
+                return
+        except Exception as e:
+            print(f"[save_data] could not read existing data.json for safety check: {e}")
+
+    tmp = DATA_FILE.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    tmp.replace(DATA_FILE)
 
 
 class VacancyBody(BaseModel):
