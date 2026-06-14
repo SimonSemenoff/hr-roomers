@@ -297,10 +297,16 @@ async def fetch_employer_vacancies() -> list[dict]:
     return results
 
 
-async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> list[dict]:
-    """Fetch candidates who responded ('откликнулись') to a specific HH.ru vacancy."""
+async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> tuple[list[dict], dict]:
+    """Fetch candidates who responded ('откликнулись') to a specific HH.ru vacancy.
+
+    Returns (results, debug_info) where debug_info contains raw diagnostics
+    (page url, link counts, sample hrefs) to help diagnose HH markup changes
+    without needing access to server logs.
+    """
     results = []
     seen_ids = set()
+    debug_info = {}
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await _load_or_create_context(browser)
@@ -309,10 +315,23 @@ async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> list[d
         await page.goto(url, wait_until="domcontentloaded")
         await asyncio.sleep(2)
 
+        print(f"[fetch_vacancy_responses] url after goto: {page.url}")
+        debug_info["page_url"] = page.url
+
         links = await page.query_selector_all('a[href*="/resume/"]')
-        resume_urls = []
+        all_hrefs = []
         for link in links:
             href = await link.get_attribute("href")
+            if href:
+                all_hrefs.append(href)
+        print(f"[fetch_vacancy_responses] total a[href*='/resume/'] links: {len(all_hrefs)}")
+        for h in all_hrefs[:8]:
+            print(f"[fetch_vacancy_responses]   sample href: {h}")
+        debug_info["total_resume_links"] = len(all_hrefs)
+        debug_info["sample_hrefs"] = all_hrefs[:8]
+
+        resume_urls = []
+        for href in all_hrefs:
             if not href or "/resume/" not in href:
                 continue
             # Only actual applicants ("responses"), not suggested matches
@@ -327,6 +346,28 @@ async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> list[d
             if len(resume_urls) >= limit:
                 break
 
+        print(f"[fetch_vacancy_responses] resume_urls after filtering: {len(resume_urls)}")
+        debug_info["resume_urls_filtered"] = len(resume_urls)
+
+        # Fallback: if the "hhtmFromLabel=responses" filter matched nothing
+        # (e.g. HH changed the URL params again), fall back to any unique
+        # /resume/ links found on the page rather than returning nothing.
+        if not resume_urls and all_hrefs:
+            print("[fetch_vacancy_responses] filter matched 0, falling back to all /resume/ links")
+            for href in all_hrefs:
+                if "/resume/" not in href:
+                    continue
+                resume_id = href.split("/resume/")[1].split("?")[0]
+                if resume_id in seen_ids:
+                    continue
+                seen_ids.add(resume_id)
+                full_url = href if href.startswith("http") else "https://hh.ru" + href
+                resume_urls.append(full_url)
+                if len(resume_urls) >= limit:
+                    break
+            debug_info["used_fallback"] = True
+            debug_info["resume_urls_fallback"] = len(resume_urls)
+
         for r_url in resume_urls:
             candidate = await _parse_resume(page, r_url)
             if candidate:
@@ -334,7 +375,7 @@ async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> list[d
             await asyncio.sleep(RESUME_VIEW_DELAY)
 
         await browser.close()
-    return results
+    return results, debug_info
 
 
 async def fetch_favorites_folder(folder_name: str = FAVORITES_FOLDER_NAME, limit: int = 50) -> list[dict]:

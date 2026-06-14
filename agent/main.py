@@ -421,11 +421,11 @@ async def do_search(req: SearchRequest):
         favorite_ids = set()
         if "hh" in req.sources:
             if req.hh_vacancy_id:
-                responses = await fetch_vacancy_responses(req.hh_vacancy_id)
+                responses, responses_debug = await fetch_vacancy_responses(req.hh_vacancy_id)
                 response_ids = {c["id"] for c in responses}
                 raw_candidates += responses
                 print(f"[search {req.search_id}] responses: {len(responses)}")
-                _save_debug(req.search_id, responses=len(responses))
+                _save_debug(req.search_id, responses=len(responses), responses_debug=responses_debug)
 
             favorites = await fetch_favorites_folder()
             favorite_ids = {c["id"] for c in favorites}
