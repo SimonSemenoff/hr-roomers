@@ -28,7 +28,7 @@ async def search_hh(req) -> list[dict]:
     seen_ids = set()
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
+        browser = await p.chromium.launch(headless=True)
         context = await _load_or_create_context(browser)
         page = await context.new_page()
 
