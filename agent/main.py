@@ -117,6 +117,26 @@ def health_check():
     return {"status": "ok"}
 
 
+# ── Temporary diagnostics for DATA_DIR/volume persistence issues ──
+@app.get("/api/debug/datadir")
+def debug_datadir():
+    info = {
+        "DATA_DIR_env": os.getenv("DATA_DIR"),
+        "DATA_DIR_resolved": str(DATA_DIR),
+        "DATA_DIR_exists": DATA_DIR.exists(),
+        "DATA_FILE": str(DATA_FILE),
+        "DATA_FILE_exists": DATA_FILE.exists(),
+    }
+    if DATA_FILE.exists():
+        info["DATA_FILE_size"] = DATA_FILE.stat().st_size
+        info["DATA_FILE_mtime"] = DATA_FILE.stat().st_mtime
+    try:
+        info["DATA_DIR_listing"] = [p.name for p in DATA_DIR.iterdir()]
+    except Exception as e:
+        info["DATA_DIR_listing_error"] = str(e)
+    return info
+
+
 # ── Vacancies ──────────────────────────────────────────────
 @app.get("/api/vacancies")
 def list_vacancies():
