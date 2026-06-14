@@ -1,3 +1,4 @@
+from __future__ import annotations
 from playwright.async_api import async_playwright
 import asyncio
 import json

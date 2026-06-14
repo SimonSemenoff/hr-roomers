@@ -1,3 +1,4 @@
+from __future__ import annotations
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -64,6 +65,12 @@ class SearchRequest(BaseModel):
     salary_from: Optional[int] = None
     notes: Optional[str] = None
     sources: list[str] = ["hh"]
+
+
+# ── Health ─────────────────────────────────────────────────
+@app.get("/api/health")
+def health_check():
+    return {"status": "ok"}
 
 
 # ── Vacancies ──────────────────────────────────────────────
