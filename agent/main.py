@@ -242,6 +242,10 @@ def update_candidate(search_id: str, candidate_id: str, body: dict):
     for c in data["candidates"].get(search_id, []):
         if c["id"] == candidate_id:
             c["status"] = body.get("status", c["status"])
+            if "feedback" in body:
+                c["feedback"] = body.get("feedback")
+            if "feedback_comment" in body:
+                c["feedback_comment"] = body.get("feedback_comment")
             break
     save_data(data)
     return {"ok": True}
@@ -361,11 +365,35 @@ def build_company_context(data: dict) -> str:
     return "\n\n".join(parts)
 
 
+def build_feedback_context(data: dict, max_each: int = 5) -> str:
+    """Build a text summary of recent HR feedback ("good"/"bad") on candidates
+    across all vacancies, so the AI can learn from real HR decisions over time."""
+    good, bad = [], []
+    for candidates in data.get("candidates", {}).values():
+        for c in candidates:
+            fb = c.get("feedback")
+            if fb not in ("good", "bad"):
+                continue
+            entry = f"- {c.get('title', '')}: {c.get('summary', '')}"
+            if c.get("feedback_comment"):
+                entry += f" (комментарий HR: {c['feedback_comment']})"
+            (good if fb == "good" else bad).append(entry)
+
+    parts = []
+    if good:
+        parts.append("Кандидаты, которых HR ОДОБРИЛ (ищи похожих):\n" + "\n".join(good[-max_each:]))
+    if bad:
+        parts.append("Кандидаты, которых HR ОТКЛОНИЛ (избегай похожих):\n" + "\n".join(bad[-max_each:]))
+
+    return "\n\n".join(parts)
+
+
 # ── Background search ─────────────────────────────────────
 async def do_search(req: SearchRequest):
     data = load_data()
     seen_ids = {c["id"] for c in data["candidates"].get(req.search_id, [])}
     company_context = build_company_context(data)
+    feedback_context = build_feedback_context(data)
 
     try:
         raw_candidates = []
@@ -389,7 +417,7 @@ async def do_search(req: SearchRequest):
             if raw["id"] in seen_ids:
                 continue
             seen_ids.add(raw["id"])
-            analysis = await analyze_candidate(raw, req, company_context)
+            analysis = await analyze_candidate(raw, req, company_context, feedback_context)
             if analysis["score"] >= 6:
                 candidate = {
                     "id": raw["id"],
@@ -405,6 +433,8 @@ async def do_search(req: SearchRequest):
                     "why_fits": analysis["why_fits"],
                     "red_flags": analysis.get("red_flags", ""),
                     "status": "new",
+                    "feedback": None,
+                    "feedback_comment": "",
                     "source": (
                         "hh_response" if raw["id"] in response_ids
                         else "hh_favorite" if raw["id"] in favorite_ids

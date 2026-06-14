@@ -19,6 +19,10 @@ ANALYSIS_PROMPT = """Оцени резюме кандидата.
 === ДОПОЛНИТЕЛЬНЫЕ ТРЕБОВАНИЯ ===
 {hr_notes}
 
+=== ОБРАТНАЯ СВЯЗЬ HR ПО ПРЕДЫДУЩИМ КАНДИДАТАМ ===
+Учти эти реальные решения HR-менеджера при оценке — постарайся находить похожих на одобренных и избегать похожих на отклонённых:
+{feedback_context}
+
 === РЕЗЮМЕ ===
 Должность: {title}
 Город: {city}
@@ -40,13 +44,14 @@ DEFAULT_PROFILE = """Менеджер по продажам посуды и ку
 - Живёт в Москве или готов переехать"""
 
 
-async def analyze_candidate(raw: dict, req, company_context: str = "") -> dict:
+async def analyze_candidate(raw: dict, req, company_context: str = "", feedback_context: str = "") -> dict:
     profile = req.candidate_profile or DEFAULT_PROFILE
 
     prompt = ANALYSIS_PROMPT.format(
         company_context=company_context or "не задан",
         candidate_profile=profile,
         hr_notes=req.notes or "нет",
+        feedback_context=feedback_context or "пока нет оценённых кандидатов",
         title=raw.get("title", ""),
         city=raw.get("city", ""),
         full_text=raw.get("full_text", ""),

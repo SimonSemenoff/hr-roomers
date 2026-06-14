@@ -19,6 +19,8 @@ interface Candidate {
   red_flags?: string;
   status: "new" | "viewed" | "interesting" | "rejected";
   source: "hh" | "hh_response" | "hh_favorite" | "telegram";
+  feedback?: "good" | "bad" | null;
+  feedback_comment?: string;
 }
 
 const sourceLabels: Record<string, string> = {
@@ -84,6 +86,34 @@ export default function CandidateTable({ searchId, onBack }: Props) {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
+    });
+  }
+
+  async function updateFeedback(candidateId: string, feedback: "good" | "bad") {
+    setCandidates((prev) =>
+      prev.map((c) =>
+        c.id === candidateId
+          ? { ...c, feedback: c.feedback === feedback ? null : feedback }
+          : c
+      )
+    );
+    const current = candidates.find((c) => c.id === candidateId);
+    const newFeedback = current?.feedback === feedback ? null : feedback;
+    await fetch(`${API_URL}/api/candidate/${searchId}/${candidateId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feedback: newFeedback }),
+    });
+  }
+
+  async function updateFeedbackComment(candidateId: string, comment: string) {
+    setCandidates((prev) =>
+      prev.map((c) => (c.id === candidateId ? { ...c, feedback_comment: comment } : c))
+    );
+    await fetch(`${API_URL}/api/candidate/${searchId}/${candidateId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feedback_comment: comment }),
     });
   }
 
@@ -217,6 +247,43 @@ export default function CandidateTable({ searchId, onBack }: Props) {
                   <p className="text-xs mt-1" style={{ color: "#D97706" }}>
                     ⚠ {c.red_flags}
                   </p>
+                )}
+
+                <div className="flex items-center gap-2 mt-3">
+                  <button
+                    onClick={() => updateFeedback(c.id, "good")}
+                    className="text-xs px-2.5 py-1 rounded-lg transition-all"
+                    style={{
+                      background: c.feedback === "good" ? "#DCFCE7" : "var(--hover)",
+                      color: c.feedback === "good" ? "#16A34A" : "var(--text-secondary)",
+                      border: `1px solid ${c.feedback === "good" ? "#16A34A" : "var(--border)"}`,
+                    }}
+                    title="Подходит — AI будет искать похожих"
+                  >
+                    👍 Подходит
+                  </button>
+                  <button
+                    onClick={() => updateFeedback(c.id, "bad")}
+                    className="text-xs px-2.5 py-1 rounded-lg transition-all"
+                    style={{
+                      background: c.feedback === "bad" ? "#FEE2E2" : "var(--hover)",
+                      color: c.feedback === "bad" ? "#DC2626" : "var(--text-secondary)",
+                      border: `1px solid ${c.feedback === "bad" ? "#DC2626" : "var(--border)"}`,
+                    }}
+                    title="Не подходит — AI будет избегать похожих"
+                  >
+                    👎 Не подходит
+                  </button>
+                </div>
+
+                {c.feedback === "bad" && (
+                  <input
+                    defaultValue={c.feedback_comment || ""}
+                    onBlur={(e) => updateFeedbackComment(c.id, e.target.value)}
+                    placeholder="Почему не подходит? (необязательно, поможет AI учиться)"
+                    className="input-field mt-2 text-xs"
+                    style={{ padding: "6px 10px" }}
+                  />
                 )}
               </div>
             </div>
