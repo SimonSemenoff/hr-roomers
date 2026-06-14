@@ -23,10 +23,11 @@ SEARCH_QUERIES = {
 
 
 # HH.ru rate-limits/blocks resume views after too many requests in a short
-# time from one session. Keep a conservative overall budget per search run.
-MAX_RESUMES_PER_RUN = 15
-MAX_RESUMES_PER_QUERY = 3
-RESUME_VIEW_DELAY = 4  # seconds between opening resumes
+# time from one session. Instead of capping the total number of resumes,
+# space out the requests so a single run can look at as many as needed
+# without tripping the anti-bot limit.
+MAX_RESUMES_PER_QUERY = 10
+RESUME_VIEW_DELAY = 10  # seconds between opening resumes
 
 
 async def search_hh(req) -> list[dict]:
@@ -51,14 +52,9 @@ async def search_hh(req) -> list[dict]:
 
         await _save_session(context)
 
-        budget = MAX_RESUMES_PER_RUN
         for query in queries:
-            if budget <= 0:
-                print(f"[search_hh] resume view budget exhausted, stopping before query {query!r}")
-                break
-            found = await _search_query(page, query, req, limit=min(MAX_RESUMES_PER_QUERY, budget))
-            budget -= len(found)
-            print(f"[search_hh] query {query!r} -> {len(found)} resumes (budget left: {budget})")
+            found = await _search_query(page, query, req, limit=MAX_RESUMES_PER_QUERY)
+            print(f"[search_hh] query {query!r} -> {len(found)} resumes")
             for c in found:
                 if c["id"] not in seen_ids:
                     seen_ids.add(c["id"])
