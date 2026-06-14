@@ -22,6 +22,13 @@ SEARCH_QUERIES = {
 }
 
 
+# HH.ru rate-limits/blocks resume views after too many requests in a short
+# time from one session. Keep a conservative overall budget per search run.
+MAX_RESUMES_PER_RUN = 15
+MAX_RESUMES_PER_QUERY = 3
+RESUME_VIEW_DELAY = 4  # seconds between opening resumes
+
+
 async def search_hh(req) -> list[dict]:
     queries = _build_queries(req)
     results = []
@@ -44,9 +51,14 @@ async def search_hh(req) -> list[dict]:
 
         await _save_session(context)
 
+        budget = MAX_RESUMES_PER_RUN
         for query in queries:
-            found = await _search_query(page, query, req)
-            print(f"[search_hh] query {query!r} -> {len(found)} resumes")
+            if budget <= 0:
+                print(f"[search_hh] resume view budget exhausted, stopping before query {query!r}")
+                break
+            found = await _search_query(page, query, req, limit=min(MAX_RESUMES_PER_QUERY, budget))
+            budget -= len(found)
+            print(f"[search_hh] query {query!r} -> {len(found)} resumes (budget left: {budget})")
             for c in found:
                 if c["id"] not in seen_ids:
                     seen_ids.add(c["id"])
@@ -65,7 +77,7 @@ def _build_queries(req) -> list[str]:
     return list(set(queries))
 
 
-async def _search_query(page, query: str, req) -> list[dict]:
+async def _search_query(page, query: str, req, limit: int = MAX_RESUMES_PER_QUERY) -> list[dict]:
     results = []
     try:
         url = _build_search_url(query, req)
@@ -74,7 +86,7 @@ async def _search_query(page, query: str, req) -> list[dict]:
 
         resume_links = await page.query_selector_all('a[data-qa="serp-item__title"]')
         urls = []
-        for link in resume_links[:10]:  # max 10 per query
+        for link in resume_links[:limit]:
             href = await link.get_attribute("href")
             if href:
                 urls.append("https://hh.ru" + href if href.startswith("/") else href)
@@ -86,7 +98,7 @@ async def _search_query(page, query: str, req) -> list[dict]:
             if candidate:
                 results.append(candidate)
                 await add_to_favorites_folder(page)
-            await asyncio.sleep(1)
+            await asyncio.sleep(RESUME_VIEW_DELAY)
 
     except Exception as e:
         print(f"Error searching query '{query}': {e}")
@@ -323,7 +335,7 @@ async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> list[d
             candidate = await _parse_resume(page, r_url)
             if candidate:
                 results.append(candidate)
-            await asyncio.sleep(1)
+            await asyncio.sleep(RESUME_VIEW_DELAY)
 
         await browser.close()
     return results
@@ -385,7 +397,7 @@ async def fetch_favorites_folder(folder_name: str = FAVORITES_FOLDER_NAME, limit
             candidate = await _parse_resume(page, r_url)
             if candidate:
                 results.append(candidate)
-            await asyncio.sleep(1)
+            await asyncio.sleep(RESUME_VIEW_DELAY)
 
         await browser.close()
     return results
