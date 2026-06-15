@@ -319,7 +319,7 @@ async def get_hh_vacancies():
     if not HH_SESSION.exists():
         return {"status": "error", "message": "HH.ru не подключён", "vacancies": []}
     try:
-        vacancies = await fetch_employer_vacancies()
+        vacancies, debug_info = await fetch_employer_vacancies()
         # Mark which ones are already imported
         data = load_data()
         existing_hh_ids = {
@@ -327,7 +327,7 @@ async def get_hh_vacancies():
         }
         for v in vacancies:
             v["imported"] = v["hh_id"] in existing_hh_ids
-        return {"status": "ok", "vacancies": vacancies}
+        return {"status": "ok", "vacancies": vacancies, "debug": debug_info}
     except Exception as e:
         return {"status": "error", "message": str(e), "vacancies": []}
 

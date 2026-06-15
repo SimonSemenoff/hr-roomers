@@ -259,17 +259,45 @@ async def _do_login(page):
     print("Авторизация успешна!")
 
 
-async def fetch_employer_vacancies() -> list[dict]:
-    """Fetch the list of the employer's active vacancies from HH.ru."""
+async def fetch_employer_vacancies() -> tuple[list[dict], dict]:
+    """Fetch the list of the employer's active vacancies from HH.ru.
+
+    Returns (results, debug_info) for diagnosing HH markup changes without
+    server log access.
+    """
     results = []
+    debug_info = {}
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await _load_or_create_context(browser)
         page = await context.new_page()
         await page.goto("https://hh.ru/employer/vacancies", wait_until="domcontentloaded")
-        await asyncio.sleep(2)
+        await asyncio.sleep(4)
+
+        print(f"[fetch_employer_vacancies] url after goto: {page.url}")
+        debug_info["page_url"] = page.url
+
+        body_text = await _get_text(page, "body")
+        debug_info["body_len"] = len(body_text)
+        debug_info["body_snippet"] = body_text[:300]
+        print(f"[fetch_employer_vacancies] body_len={len(body_text)}, snippet={body_text[:300]!r}")
 
         cards = await page.query_selector_all('[data-qa="vacancies-dashboard-vacancy"]')
+        print(f"[fetch_employer_vacancies] [data-qa='vacancies-dashboard-vacancy'] cards: {len(cards)}")
+        debug_info["cards_found"] = len(cards)
+
+        # Fallback: HH may have renamed the dashboard card data-qa. Try to
+        # find vacancy links directly.
+        vacancy_links = await page.query_selector_all('a[href*="/vacancy/"]')
+        all_vacancy_hrefs = []
+        for link in vacancy_links:
+            href = await link.get_attribute("href")
+            if href:
+                all_vacancy_hrefs.append(href)
+        print(f"[fetch_employer_vacancies] a[href*='/vacancy/'] links: {len(all_vacancy_hrefs)}")
+        debug_info["vacancy_link_count"] = len(all_vacancy_hrefs)
+        debug_info["sample_vacancy_hrefs"] = all_vacancy_hrefs[:10]
+
         for card in cards:
             try:
                 name_link = await card.query_selector('a[data-qa="vacancies-dashboard-vacancy-name"]')
@@ -293,8 +321,33 @@ async def fetch_employer_vacancies() -> list[dict]:
             except Exception as e:
                 print(f"Error parsing vacancy card: {e}")
 
+        # Fallback: dashboard card markup changed and no cards matched, but
+        # we still found vacancy links on the page — build minimal entries
+        # from those so import still works (no responses count available).
+        if not results and all_vacancy_hrefs:
+            print("[fetch_employer_vacancies] no cards matched, falling back to vacancy links")
+            seen_ids = set()
+            for href in all_vacancy_hrefs:
+                if "/vacancy/" not in href:
+                    continue
+                vacancy_id = href.split("/vacancy/")[-1].split("?")[0]
+                if not vacancy_id.isdigit() or vacancy_id in seen_ids:
+                    continue
+                seen_ids.add(vacancy_id)
+                link_el = await page.query_selector(f'a[href*="/vacancy/{vacancy_id}"]')
+                title = (await link_el.inner_text()).strip() if link_el else ""
+                if title:
+                    results.append({
+                        "hh_id": vacancy_id,
+                        "title": title,
+                        "url": f"https://hh.ru/vacancy/{vacancy_id}",
+                        "responses_count": "0",
+                    })
+            debug_info["used_fallback"] = True
+            debug_info["fallback_results"] = len(results)
+
         await browser.close()
-    return results
+    return results, debug_info
 
 
 async def fetch_vacancy_responses(hh_vacancy_id: str, limit: int = 20) -> tuple[list[dict], dict]:
